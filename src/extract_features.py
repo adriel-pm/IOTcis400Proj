@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np
 
 COMMON_COLUMNS = ["duration", "total_bytes", "total_pkts", "avg_pkt_size",
-                   "is_tcp", "is_udp", "is_icmp", "label"]
+                   "is_tcp", "is_udp", "is_icmp", "label", "detail_label"]
 
 
 def load_iot23(path):
@@ -49,6 +49,11 @@ def load_iot23(path):
     out["is_icmp"] = (df["proto"].str.lower() == "icmp").astype(int)
     # IoT-23 uses 'label' column: "Benign" / "benign" vs "Malicious"
     out["label"] = (~df["label"].str.lower().str.contains("benign", na=False)).astype(int)
+
+    # NEW: keep the specific attack name too (not just benign/attack).
+    # IoT-23's 'detailed-label' column holds this; benign rows have "-" here.
+    out["detail_label"] = df["detailed-label"].fillna("benign")
+
     out["source"] = "iot23"
     return out[COMMON_COLUMNS + ["source"]]
 
@@ -65,6 +70,12 @@ def load_ciciot2023(path):
     out["is_udp"] = pd.to_numeric(df["UDP"], errors="coerce").fillna(0).astype(int)
     out["is_icmp"] = pd.to_numeric(df["ICMP"], errors="coerce").fillna(0).astype(int)
     out["label"] = (~df["Label"].str.lower().str.contains("benign", na=False)).astype(int)
+
+    # NEW: CICIoT2023's own 'Label' column IS the detailed attack name
+    # already (e.g. "DDoS-SYN_Flood") -- we just keep the raw string
+    # before it gets binarized into 0/1 above.
+    out["detail_label"] = df["Label"]
+
     out["source"] = "ciciot2023"
     return out[COMMON_COLUMNS + ["source"]]
 
