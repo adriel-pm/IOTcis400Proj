@@ -16,15 +16,18 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.ensemble import IsolationForest
 from sklearn.model_selection import train_test_split
-
-from models_and_eval import FEATURES, StatBaseline, evaluate
-
+from models_and_eval import FEATURES, StatBaseline, balanced_test_set, standardize_by_reference
 
 def get_f1(train_df, test_df, model):
     """Fits `model` on train_df's benign rows, evaluates on test_df,
     returns just the F1 score (the other metrics are in results.txt
     already -- this script is deliberately narrow, one number per bar)."""
     train_benign = train_df[train_df.label == 0]
+    test_benign = test_df[test_df.label == 0]
+    test_attacks = test_df[test_df.label == 1]
+    test_df = balanced_test_set(test_benign, test_attacks, ratio=1.0)
+    test_df = standardize_by_reference(train_benign, test_df)
+    train_benign = standardize_by_reference(train_benign, train_benign)
     model.fit(train_benign[FEATURES])
     if isinstance(model, StatBaseline):
         pred = model.predict(test_df[FEATURES])

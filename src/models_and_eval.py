@@ -20,23 +20,35 @@ from sklearn.metrics import precision_score, recall_score, f1_score, confusion_m
 
 FEATURES = ["duration", "total_bytes", "total_pkts", "avg_pkt_size",
             "is_tcp", "is_udp", "is_icmp"]
+CONTINUOUS_FEATURES = ["duration", "total_bytes", "total_pkts", "avg_pkt_size"]
+
+def standardize_by_reference(reference_benign_df, target_df):
+    """
+    Z-scores target_df's features using ONLY reference_benign_df's
+    mean/std -- reference_benign_df must contain BENIGN rows only.
+    Never compute reference stats from a mixed benign+attack set --
+    that lets attacks skew the very yardstick meant to detect them.
+    """
+    mean = reference_benign_df[FEATURES].mean()
+    std = reference_benign_df[FEATURES].std().replace(0, 1e-6)
+    out = target_df.copy()
+    out[FEATURES] = (target_df[FEATURES] - mean) / std
+    return out
 
 
 class StatBaseline:
-    """Flags a flow as anomalous if any feature is > z_thresh std devs
-    from the mean of the benign training data."""
     def __init__(self, z_thresh=3.0):
         self.z_thresh = z_thresh
 
     def fit(self, X_benign):
-        self.mean_ = X_benign.mean(axis=0)
-        self.std_ = X_benign.std(axis=0).replace(0, 1e-6)
+        self.mean_ = X_benign[CONTINUOUS_FEATURES].mean(axis=0)
+        self.std_ = X_benign[CONTINUOUS_FEATURES].std(axis=0).clip(lower=0.05)
         return self
 
     def predict(self, X):
-        z = ((X - self.mean_) / self.std_).abs()
+        z = ((X[CONTINUOUS_FEATURES] - self.mean_) / self.std_).abs()
         flagged = (z > self.z_thresh).any(axis=1)
-        return flagged.astype(int).values  # 1 = anomalous, 0 = normal
+        return flagged.astype(int).values
 
 
 def evaluate(y_true, y_pred, label=""):
@@ -49,14 +61,27 @@ def evaluate(y_true, y_pred, label=""):
           f"f1={f1:.3f} FPR={fpr:.3f}  (n={len(y_true)}, attacks={y_true.sum()})")
     return {"precision": prec, "recall": rec, "f1": f1, "fpr": fpr}
 
+def balanced_test_set(benign_df, attack_df, ratio=1.0, random_state=1):
+    """
+    Caps the attack rows in a test set so precision/recall aren't
+    trivially inflated by one class dominating. `ratio` = attacks per
+    benign row (1.0 = balanced 50/50 test set). If attack_df already
+    has fewer rows than the cap, we just keep all of them.
+    """
+    n_attacks_wanted = int(len(benign_df) * ratio)
+    if len(attack_df) > n_attacks_wanted:
+        attack_df = attack_df.sample(n=n_attacks_wanted, random_state=random_state)
+    return pd.concat([benign_df, attack_df])
 
 def run_within_environment(df, name):
     print(f"\n=== Within-environment: {name} ===")
     benign = df[df.label == 0]
     train_benign, holdout_benign = train_test_split(
-        benign, test_size=0.3, random_state=1)
+    benign, test_size=0.3, random_state=1)
     attacks = df[df.label == 1]
-    test_df = pd.concat([holdout_benign, attacks])
+    test_df = balanced_test_set(holdout_benign, attacks, ratio=1.0)
+    test_df = standardize_by_reference(train_benign, test_df)
+    train_benign = standardize_by_reference(train_benign, train_benign)
 
     stat = StatBaseline(z_thresh=3.0).fit(train_benign[FEATURES])
     iso = IsolationForest(contamination=0.1, random_state=1).fit(train_benign[FEATURES])
@@ -72,6 +97,11 @@ def run_within_environment(df, name):
 def run_cross_environment(train_df, test_df, train_name, test_name):
     print(f"\n=== Cross-environment: trained on {train_name}, tested on {test_name} ===")
     train_benign = train_df[train_df.label == 0]
+    test_benign = test_df[test_df.label == 0]
+    test_attacks = test_df[test_df.label == 1]
+    test_df = balanced_test_set(test_benign, test_attacks, ratio=1.0)
+    test_df = standardize_by_reference(test_benign, test_df)
+    train_benign = standardize_by_reference(train_benign, train_benign)
     stat = StatBaseline(z_thresh=3.0).fit(train_benign[FEATURES])
     iso = IsolationForest(contamination=0.1, random_state=1).fit(train_benign[FEATURES])
 
