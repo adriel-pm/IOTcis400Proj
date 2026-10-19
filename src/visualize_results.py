@@ -26,7 +26,7 @@ def get_f1(train_df, test_df, model):
     test_benign = test_df[test_df.label == 0]
     test_attacks = test_df[test_df.label == 1]
     test_df = balanced_test_set(test_benign, test_attacks, ratio=1.0)
-    test_df = standardize_by_reference(train_benign, test_df)
+    test_df = standardize_by_reference(test_benign, test_df)
     train_benign = standardize_by_reference(train_benign, train_benign)
     model.fit(train_benign[FEATURES])
     if isinstance(model, StatBaseline):
