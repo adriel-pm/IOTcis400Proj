@@ -34,6 +34,10 @@ from models_and_eval import StatBaseline, evaluate, balanced_test_set
 
 FULL_CONTINUOUS = ["duration", "total_bytes", "total_pkts", "avg_pkt_size"]
 COMPARABLE_ONLY = ["total_bytes", "total_pkts", "avg_pkt_size"]
+# total_pkts is near-constant in CICIoT2023 (std=0.125, 99.95% exactly 10) --
+# exclude it too, alongside duration/IAT's unit mismatch.
+TRULY_COMPARABLE = ["total_bytes", "avg_pkt_size"]
+BYTES_ONLY = ["total_bytes"]
 
 
 class StatBaselineCustomFeatures(StatBaseline):
@@ -86,3 +90,11 @@ if __name__ == "__main__":
     print("\n##### (b) Excluding duration/IAT (unit-incompatible feature) #####")
     honest_cross_environment(iot23, ciciot, "IoT-23", "CICIoT2023", COMPARABLE_ONLY, "3-feature")
     honest_cross_environment(ciciot, iot23, "CICIoT2023", "IoT-23", COMPARABLE_ONLY, "3-feature")
+
+    print("\n##### (c) Also excluding total_pkts (near-constant in CICIoT2023) #####")
+    honest_cross_environment(iot23, ciciot, "IoT-23", "CICIoT2023", TRULY_COMPARABLE, "2-feature")
+    honest_cross_environment(ciciot, iot23, "CICIoT2023", "IoT-23", TRULY_COMPARABLE, "2-feature")
+
+    print("\n##### (d) total_bytes alone #####")
+    honest_cross_environment(iot23, ciciot, "IoT-23", "CICIoT2023", BYTES_ONLY, "1-feature")
+    honest_cross_environment(ciciot, iot23, "CICIoT2023", "IoT-23", BYTES_ONLY, "1-feature")
