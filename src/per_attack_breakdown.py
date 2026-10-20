@@ -4,6 +4,41 @@ from sklearn.ensemble import IsolationForest
 from models_and_eval import FEATURES, StatBaseline, standardize_by_reference
 
 
+def per_attack_recall_honest(train_benign, test_df, model, model_name, direction):
+    """
+    HONEST version: standardizes using ONLY training statistics, applied
+    identically to train and test -- no test-side self-calibration. This
+    is the per-attack equivalent of honest_transfer_test.py, needed
+    because the original per_attack_recall() below (left unchanged for
+    comparison) uses the same self-calibration approach already shown to
+    manufacture artificial StatBaseline "transfer" at the aggregate level.
+    """
+    mean = train_benign[FEATURES].mean()
+    std = train_benign[FEATURES].std().replace(0, 1e-6)
+    train_std = train_benign.copy()
+    train_std[FEATURES] = (train_benign[FEATURES] - mean) / std
+    test_std = test_df.copy()
+    test_std[FEATURES] = (test_df[FEATURES] - mean) / std
+
+    model.fit(train_std[FEATURES])
+    if isinstance(model, StatBaseline):
+        pred = model.predict(test_std[FEATURES])
+    else:
+        pred = (model.predict(test_std[FEATURES]) == -1).astype(int)
+
+    result = test_df.copy()
+    result["predicted_anomalous"] = pred
+    attacks_only = result[result.label == 1]
+    summary = attacks_only.groupby("detail_label").agg(
+        n_flows=("predicted_anomalous", "size"),
+        n_caught=("predicted_anomalous", "sum"),
+    )
+    summary["recall"] = (summary.n_caught / summary.n_flows).round(3)
+    summary["model"] = model_name
+    summary["direction"] = direction
+    return summary.sort_values("recall")
+
+
 def per_attack_recall(df_train_benign, df_test, model, model_name, direction):
     model.fit(df_train_benign[FEATURES])
 
@@ -65,3 +100,20 @@ if __name__ == "__main__":
     out = pd.concat(all_results)
     out.to_csv("output/per_attack_breakdown.csv")
     print("\nSaved output/per_attack_breakdown.csv")
+
+    print("\n\n########## HONEST VERSION (train-only standardization) ##########")
+    print("########## Compare this against the self-calibrated results above ##########")
+    honest_results = []
+    for (train_df, test_df, tn, sn) in [(iot23, ciciot, "IoT-23", "CICIoT2023"),
+                                          (ciciot, iot23, "CICIoT2023", "IoT-23")]:
+        direction = f"{tn} -> {sn} (HONEST)"
+        print(f"\n=== Honest per-attack breakdown: trained on {tn}, tested on {sn} ===")
+        train_benign = train_df[train_df.label == 0]
+        r1 = per_attack_recall_honest(train_benign, test_df, StatBaseline(z_thresh=3.0),
+                                       "StatBaseline", direction)
+        print(r1.to_string())
+        honest_results.append(r1)
+
+    honest_out = pd.concat(honest_results)
+    honest_out.to_csv("output/per_attack_breakdown_HONEST.csv")
+    print("\nSaved output/per_attack_breakdown_HONEST.csv")
